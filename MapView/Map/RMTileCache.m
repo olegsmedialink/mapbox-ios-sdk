@@ -150,6 +150,26 @@
     });
 }
 
+- (void)removeAllAdditionalCaches
+{
+    if (self.isBackgroundCaching)
+        [self cancelBackgroundCache];
+    
+    dispatch_barrier_async(_tileCacheQueue, ^{
+        [_tileCaches removeObjectsInRange:(NSRange){1, [_tileCaches count] - 1}];
+    });
+}
+
+- (void)removeAllTileCaches
+{
+    if (self.isBackgroundCaching)
+        [self cancelBackgroundCache];
+    
+    dispatch_barrier_async(_tileCacheQueue, ^{
+        [_tileCaches removeAllObjects];
+    });
+}
+
 - (NSArray *)tileCaches
 {
     return [NSArray arrayWithArray:_tileCaches];
@@ -263,8 +283,8 @@
     CLLocationDegrees maxCacheLon = northEast.longitude;
 
     NSAssert(minCacheZoom <= maxCacheZoom, @"Minimum zoom should be less than or equal to maximum zoom");
-    NSAssert(maxCacheLat  >  minCacheLat,  @"Northernmost bounds should exceed southernmost bounds");
-    NSAssert(maxCacheLon  >  minCacheLon,  @"Easternmost bounds should exceed westernmost bounds");
+    NSAssert(maxCacheLat  >= minCacheLat,  @"Northernmost bounds should exceed southernmost bounds");
+    NSAssert(maxCacheLon  >= minCacheLon,  @"Easternmost bounds should exceed westernmost bounds");
 
     NSUInteger n, xMin, yMax, xMax, yMin;
 
@@ -282,6 +302,102 @@
     }
 
     return totalTiles;
+}
+
+- (void)beginBackgroundCacheForTileSource:(id<RMTileSource>)tileSource alongPath:(NSArray *)path
+{
+    if (self.isBackgroundCaching)
+        return;
+    
+    _activeTileSource = tileSource;
+    
+    _backgroundFetchQueue = [[NSOperationQueue alloc] init];
+    [_backgroundFetchQueue setMaxConcurrentOperationCount:6];
+    
+    NSUInteger minCacheZoom = 0;
+    NSUInteger maxCacheZoom = 17;
+    
+    NSUInteger totalTiles = 0;
+    
+    __block NSUInteger progTile = 0;
+    
+    for (NSUInteger i = 1; i < [path count]; i++)
+    {
+        CLLocation *loc1 = path[i - 1];
+        CLLocation *loc2 = path[i];
+        
+        CLLocationDegrees minCacheLat = MIN(loc1.coordinate.latitude, loc2.coordinate.latitude);
+        CLLocationDegrees maxCacheLat = MAX(loc1.coordinate.latitude, loc2.coordinate.latitude);
+        CLLocationDegrees minCacheLon = MIN(loc1.coordinate.longitude, loc2.coordinate.longitude);
+        CLLocationDegrees maxCacheLon = MAX(loc1.coordinate.longitude, loc2.coordinate.longitude);
+        
+        totalTiles += [self tileCountForSouthWest:CLLocationCoordinate2DMake(minCacheLat, minCacheLon) northEast:CLLocationCoordinate2DMake(maxCacheLat, maxCacheLon) minZoom:minCacheZoom maxZoom:maxCacheZoom];
+    }
+    
+    if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCache:didBeginBackgroundCacheWithCount:forTileSource:)])
+        [_backgroundCacheDelegate tileCache:self didBeginBackgroundCacheWithCount:totalTiles forTileSource:_activeTileSource];
+    
+    for (NSUInteger i = 1; i < [path count]; i++)
+    {
+        CLLocation *loc1 = path[i - 1];
+        CLLocation *loc2 = path[i];
+        
+        CLLocationDegrees minCacheLat = MIN(loc1.coordinate.latitude, loc2.coordinate.latitude);
+        CLLocationDegrees maxCacheLat = MAX(loc1.coordinate.latitude, loc2.coordinate.latitude);
+        CLLocationDegrees minCacheLon = MIN(loc1.coordinate.longitude, loc2.coordinate.longitude);
+        CLLocationDegrees maxCacheLon = MAX(loc1.coordinate.longitude, loc2.coordinate.longitude);
+        
+        NSUInteger n, xMin, yMax, xMax, yMin;
+        
+        for (NSUInteger zoom = minCacheZoom; zoom <= maxCacheZoom; zoom++)
+        {
+            n = pow(2.0, zoom);
+            xMin = floor(((minCacheLon + 180.0) / 360.0) * n);
+            yMax = floor((1.0 - (logf(tanf(minCacheLat * M_PI / 180.0) + 1.0 / cosf(minCacheLat * M_PI / 180.0)) / M_PI)) / 2.0 * n);
+            xMax = floor(((maxCacheLon + 180.0) / 360.0) * n);
+            yMin = floor((1.0 - (logf(tanf(maxCacheLat * M_PI / 180.0) + 1.0 / cosf(maxCacheLat * M_PI / 180.0)) / M_PI)) / 2.0 * n);
+            
+            for (NSUInteger x = xMin; x <= xMax; x++)
+            {
+                for (NSUInteger y = yMin; y <= yMax; y++)
+                {
+                    RMTileCacheDownloadOperation *operation = [[RMTileCacheDownloadOperation alloc] initWithTile:RMTileMake(x, y, zoom)
+                                                                                                   forTileSource:_activeTileSource
+                                                                                                      usingCache:self];
+                    
+                    __block RMTileCacheDownloadOperation *internalOperation = operation;
+                    
+                    [operation setCompletionBlock:^(void)
+                     {
+                         dispatch_sync(dispatch_get_main_queue(), ^(void)
+                                       {
+                                           if ( ! [internalOperation isCancelled])
+                                           {
+                                               progTile++;
+                                               
+                                               if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCache:didBackgroundCacheTile:withIndex:ofTotalTileCount:)])
+                                                   [_backgroundCacheDelegate tileCache:self didBackgroundCacheTile:RMTileMake(x, y, zoom) withIndex:progTile ofTotalTileCount:totalTiles];
+                                               
+                                               if (progTile == totalTiles)
+                                               {
+                                                   _backgroundFetchQueue = nil;
+                                                   
+                                                   _activeTileSource = nil;
+                                                   
+                                                   if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCacheDidFinishBackgroundCache:)])
+                                                       [_backgroundCacheDelegate tileCacheDidFinishBackgroundCache:self];
+                                               }
+                                           }
+                                           
+                                           internalOperation = nil;
+                                       });
+                     }];
+                    
+                    [_backgroundFetchQueue addOperation:operation];
+                }
+            }
+        };
+    }
 }
 
 - (void)beginBackgroundCacheForTileSource:(id <RMTileSource>)tileSource southWest:(CLLocationCoordinate2D)southWest northEast:(CLLocationCoordinate2D)northEast minZoom:(NSUInteger)minZoom maxZoom:(NSUInteger)maxZoom

@@ -136,6 +136,8 @@ typedef enum : short {
 *   @param cache A memory-based or disk-based cache. */
 - (void)addCache:(id <RMTileCache>)cache;
 - (void)insertCache:(id <RMTileCache>)cache atIndex:(NSUInteger)index;
+- (void)removeAllAdditionalCaches;
+- (void)removeAllTileCaches;
 
 /** The list of caches managed by a cache manager. This could include memory-based, disk-based, or other types of caches. */
 @property (nonatomic, readonly, strong) NSArray *tileCaches;
@@ -157,6 +159,11 @@ typedef enum : short {
 *   @param minZoom The minimum zoom level to cache. 
 *   @param maxZoom The maximum zoom level to cache. */
 - (void)beginBackgroundCacheForTileSource:(id <RMTileSource>)tileSource southWest:(CLLocationCoordinate2D)southWest northEast:(CLLocationCoordinate2D)northEast minZoom:(NSUInteger)minZoom maxZoom:(NSUInteger)maxZoom;
+
+/** Tells the tile cache to begin background caching. Progress during the caching operation can be observed by implementing the RMTileCacheBackgroundDelegate protocol.
+ *   @param tileSource The tile source from which to retrieve tiles.
+ *   @param path The path which consists of CLLocation */
+- (void)beginBackgroundCacheForTileSource:(id<RMTileSource>)tileSource alongPath:(NSArray *)path;
 
 /** Cancel any background caching. 
 *
