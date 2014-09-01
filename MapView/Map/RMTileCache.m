@@ -314,7 +314,7 @@
     _backgroundFetchQueue = [[NSOperationQueue alloc] init];
     [_backgroundFetchQueue setMaxConcurrentOperationCount:6];
     
-    NSUInteger minCacheZoom = 0;
+    NSUInteger minCacheZoom = 1;
     NSUInteger maxCacheZoom = 17;
     
     NSUInteger totalTiles = 0;
