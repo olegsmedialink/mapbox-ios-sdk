@@ -331,7 +331,7 @@
         }
 
         lastScale = 0.0;
-        [self recalculateGeometryAnimated:NO];
+//        [self recalculateGeometryAnimated:NO];
     }
 
     [self setNeedsDisplay];
