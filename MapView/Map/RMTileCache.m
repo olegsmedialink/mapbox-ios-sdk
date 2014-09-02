@@ -336,68 +336,71 @@
     
     if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCache:didBeginBackgroundCacheWithCount:forTileSource:)])
         [_backgroundCacheDelegate tileCache:self didBeginBackgroundCacheWithCount:totalTiles forTileSource:_activeTileSource];
+    dispatch_queue_t queue = dispatch_queue_create("com.RidingSocial.BackgroundCache", DISPATCH_QUEUE_PRIORITY_DEFAULT);
     
-    for (NSUInteger i = 1; i < [path count]; i++)
-    {
-        CLLocation *loc1 = path[i - 1];
-        CLLocation *loc2 = path[i];
-        
-        CLLocationDegrees minCacheLat = MIN(loc1.coordinate.latitude, loc2.coordinate.latitude);
-        CLLocationDegrees maxCacheLat = MAX(loc1.coordinate.latitude, loc2.coordinate.latitude);
-        CLLocationDegrees minCacheLon = MIN(loc1.coordinate.longitude, loc2.coordinate.longitude);
-        CLLocationDegrees maxCacheLon = MAX(loc1.coordinate.longitude, loc2.coordinate.longitude);
-        
-        NSUInteger n, xMin, yMax, xMax, yMin;
-        
-        for (NSUInteger zoom = minCacheZoom; zoom <= maxCacheZoom; zoom++)
+    dispatch_async(queue, ^{
+        for (NSUInteger i = 1; i < [path count]; i++)
         {
-            n = pow(2.0, zoom);
-            xMin = floor(((minCacheLon + 180.0) / 360.0) * n);
-            yMax = floor((1.0 - (logf(tanf(minCacheLat * M_PI / 180.0) + 1.0 / cosf(minCacheLat * M_PI / 180.0)) / M_PI)) / 2.0 * n);
-            xMax = floor(((maxCacheLon + 180.0) / 360.0) * n);
-            yMin = floor((1.0 - (logf(tanf(maxCacheLat * M_PI / 180.0) + 1.0 / cosf(maxCacheLat * M_PI / 180.0)) / M_PI)) / 2.0 * n);
+            CLLocation *loc1 = path[i - 1];
+            CLLocation *loc2 = path[i];
             
-            for (NSUInteger x = xMin; x <= xMax; x++)
+            CLLocationDegrees minCacheLat = MIN(loc1.coordinate.latitude, loc2.coordinate.latitude);
+            CLLocationDegrees maxCacheLat = MAX(loc1.coordinate.latitude, loc2.coordinate.latitude);
+            CLLocationDegrees minCacheLon = MIN(loc1.coordinate.longitude, loc2.coordinate.longitude);
+            CLLocationDegrees maxCacheLon = MAX(loc1.coordinate.longitude, loc2.coordinate.longitude);
+            
+            NSUInteger n, xMin, yMax, xMax, yMin;
+            
+            for (NSUInteger zoom = minCacheZoom; zoom <= maxCacheZoom; zoom++)
             {
-                for (NSUInteger y = yMin; y <= yMax; y++)
+                n = pow(2.0, zoom);
+                xMin = floor(((minCacheLon + 180.0) / 360.0) * n);
+                yMax = floor((1.0 - (logf(tanf(minCacheLat * M_PI / 180.0) + 1.0 / cosf(minCacheLat * M_PI / 180.0)) / M_PI)) / 2.0 * n);
+                xMax = floor(((maxCacheLon + 180.0) / 360.0) * n);
+                yMin = floor((1.0 - (logf(tanf(maxCacheLat * M_PI / 180.0) + 1.0 / cosf(maxCacheLat * M_PI / 180.0)) / M_PI)) / 2.0 * n);
+                
+                for (NSUInteger x = xMin; x <= xMax; x++)
                 {
-                    RMTileCacheDownloadOperation *operation = [[RMTileCacheDownloadOperation alloc] initWithTile:RMTileMake(x, y, zoom)
-                                                                                                   forTileSource:_activeTileSource
-                                                                                                      usingCache:self];
-                    
-                    __block RMTileCacheDownloadOperation *internalOperation = operation;
-                    
-                    [operation setCompletionBlock:^(void)
-                     {
-                         dispatch_sync(dispatch_get_main_queue(), ^(void)
-                                       {
-                                           if ( ! [internalOperation isCancelled])
+                    for (NSUInteger y = yMin; y <= yMax; y++)
+                    {
+                        RMTileCacheDownloadOperation *operation = [[RMTileCacheDownloadOperation alloc] initWithTile:RMTileMake(x, y, zoom)
+                                                                                                       forTileSource:_activeTileSource
+                                                                                                          usingCache:self];
+                        
+                        __block RMTileCacheDownloadOperation *internalOperation = operation;
+                        
+                        [operation setCompletionBlock:^(void)
+                         {
+                             dispatch_sync(dispatch_get_main_queue(), ^(void)
                                            {
-                                               progTile++;
-                                               
-                                               if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCache:didBackgroundCacheTile:withIndex:ofTotalTileCount:)])
-                                                   [_backgroundCacheDelegate tileCache:self didBackgroundCacheTile:RMTileMake(x, y, zoom) withIndex:progTile ofTotalTileCount:totalTiles];
-                                               
-                                               if (progTile == totalTiles)
+                                               if ( ! [internalOperation isCancelled])
                                                {
-                                                   _backgroundFetchQueue = nil;
+                                                   progTile++;
                                                    
-                                                   _activeTileSource = nil;
+                                                   if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCache:didBackgroundCacheTile:withIndex:ofTotalTileCount:)])
+                                                       [_backgroundCacheDelegate tileCache:self didBackgroundCacheTile:RMTileMake(x, y, zoom) withIndex:progTile ofTotalTileCount:totalTiles];
                                                    
-                                                   if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCacheDidFinishBackgroundCache:)])
-                                                       [_backgroundCacheDelegate tileCacheDidFinishBackgroundCache:self];
+                                                   if (progTile == totalTiles)
+                                                   {
+                                                       _backgroundFetchQueue = nil;
+                                                       
+                                                       _activeTileSource = nil;
+                                                       
+                                                       if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCacheDidFinishBackgroundCache:)])
+                                                           [_backgroundCacheDelegate tileCacheDidFinishBackgroundCache:self];
+                                                   }
                                                }
-                                           }
-                                           
-                                           internalOperation = nil;
-                                       });
-                     }];
-                    
-                    [_backgroundFetchQueue addOperation:operation];
+                                               
+                                               internalOperation = nil;
+                                           });
+                         }];
+                        
+                        [_backgroundFetchQueue addOperation:operation];
+                    }
                 }
-            }
-        };
-    }
+            };
+        }
+    });
 }
 
 - (void)beginBackgroundCacheForTileSource:(id <RMTileSource>)tileSource southWest:(CLLocationCoordinate2D)southWest northEast:(CLLocationCoordinate2D)northEast minZoom:(NSUInteger)minZoom maxZoom:(NSUInteger)maxZoom
