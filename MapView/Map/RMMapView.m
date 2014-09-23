@@ -414,12 +414,12 @@
 
 - (id)initWithCoder:(NSCoder *)decoder
 {
-    if (![super initWithCoder:decoder])
-        return nil;
-
-    _earlyTileSources = [NSMutableArray array];
-
-    return self;
+    if (self = [super initWithCoder:decoder])
+    {
+        _earlyTileSources = [NSMutableArray array];
+        return self;
+    }
+    return nil;
 }
 
 - (void)setFrame:(CGRect)frame
@@ -3284,7 +3284,7 @@
         if ([CLLocationManager instancesRespondToSelector:@selector(requestWhenInUseAuthorization)])
         {
             NSAssert([[[NSBundle mainBundle] infoDictionary] valueForKey:@"NSLocationWhenInUseUsageDescription"], @"For iOS 8 and above, your app must have a value for NSLocationWhenInUseUsageDescription in its Info.plist");
-            [_locationManager requestWhenInUseAuthorization];
+            [_locationManager requestAlwaysAuthorization];
         }
 #endif
 
