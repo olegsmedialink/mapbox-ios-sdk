@@ -163,7 +163,7 @@ typedef enum : short {
 /** Tells the tile cache to begin background caching. Progress during the caching operation can be observed by implementing the RMTileCacheBackgroundDelegate protocol.
  *   @param tileSource The tile source from which to retrieve tiles.
  *   @param path The path which consists of CLLocation */
-- (void)beginBackgroundCacheForTileSource:(id<RMTileSource>)tileSource alongPath:(NSArray *)path;
+- (void)beginBackgroundCacheForTileSource:(id<RMTileSource>)tileSource alongPath:(NSArray *)path withMinZoom:(NSUInteger)minCacheZoom maxZoom:(NSUInteger)maxCacheZoom;
 
 /** Cancel any background caching. 
 *
@@ -177,5 +177,7 @@ typedef enum : short {
 *   @param maxZoom The maximum zoom level to cache.
 *   @return The number of tiles representing the coverage area. */
 - (NSUInteger)tileCountForSouthWest:(CLLocationCoordinate2D)southWest northEast:(CLLocationCoordinate2D)northEast minZoom:(NSUInteger)minZoom maxZoom:(NSUInteger)maxZoom;
+
+- (NSUInteger)tileCountForPath:(NSArray *)path minZoom:(NSUInteger)minZoom maxZoom:(NSUInteger)maxZoom;
 
 @end

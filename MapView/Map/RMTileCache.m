@@ -304,23 +304,9 @@
     return totalTiles;
 }
 
-- (void)beginBackgroundCacheForTileSource:(id<RMTileSource>)tileSource alongPath:(NSArray *)path
+- (NSUInteger)tileCountForPath:(NSArray *)path minZoom:(NSUInteger)minZoom maxZoom:(NSUInteger)maxZoom
 {
-    if (self.isBackgroundCaching)
-        return;
-    
-    _activeTileSource = tileSource;
-    
-    _backgroundFetchQueue = [[NSOperationQueue alloc] init];
-    [_backgroundFetchQueue setMaxConcurrentOperationCount:6];
-    
-    NSUInteger minCacheZoom = 1;
-    NSUInteger maxCacheZoom = 17;
-    
     NSUInteger totalTiles = 0;
-    
-    __block NSUInteger progTile = 0;
-    
     for (NSUInteger i = 1; i < [path count]; i++)
     {
         CLLocation *loc1 = path[i - 1];
@@ -331,8 +317,25 @@
         CLLocationDegrees minCacheLon = MIN(loc1.coordinate.longitude, loc2.coordinate.longitude);
         CLLocationDegrees maxCacheLon = MAX(loc1.coordinate.longitude, loc2.coordinate.longitude);
         
-        totalTiles += [self tileCountForSouthWest:CLLocationCoordinate2DMake(minCacheLat, minCacheLon) northEast:CLLocationCoordinate2DMake(maxCacheLat, maxCacheLon) minZoom:minCacheZoom maxZoom:maxCacheZoom];
+        totalTiles += [self tileCountForSouthWest:CLLocationCoordinate2DMake(minCacheLat, minCacheLon) northEast:CLLocationCoordinate2DMake(maxCacheLat, maxCacheLon) minZoom:minZoom maxZoom:maxZoom];
     }
+    return totalTiles;
+}
+
+- (void)beginBackgroundCacheForTileSource:(id<RMTileSource>)tileSource alongPath:(NSArray *)path withMinZoom:(NSUInteger)minCacheZoom maxZoom:(NSUInteger)maxCacheZoom
+{
+    if (self.isBackgroundCaching)
+        return;
+    
+    _activeTileSource = tileSource;
+    
+    _backgroundFetchQueue = [[NSOperationQueue alloc] init];
+    [_backgroundFetchQueue setMaxConcurrentOperationCount:6];
+    
+    NSUInteger totalTiles = [self tileCountForPath:path minZoom:minCacheZoom maxZoom:maxCacheZoom];
+    
+    __block NSUInteger progTile = 0;
+    
     
     if ([_backgroundCacheDelegate respondsToSelector:@selector(tileCache:didBeginBackgroundCacheWithCount:forTileSource:)])
         [_backgroundCacheDelegate tileCache:self didBeginBackgroundCacheWithCount:totalTiles forTileSource:_activeTileSource];
