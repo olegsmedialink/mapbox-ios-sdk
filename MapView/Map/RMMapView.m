@@ -66,9 +66,6 @@
 #define kDefaultMaximumZoomLevel 25.0
 #define kDefaultInitialZoomLevel 11.0
 
-#define kRMTrackingHaloAnnotationTypeName   @"RMTrackingHaloAnnotation"
-#define kRMAccuracyCircleAnnotationTypeName @"RMAccuracyCircleAnnotation"
-
 #pragma mark --- end constants ----
 
 @interface RMMapView (PrivateMethods) <UIScrollViewDelegate,
@@ -149,6 +146,7 @@
     BOOL _delegateHasShouldDragAnnotation;
     BOOL _delegateHasDidChangeDragState;
     BOOL _delegateHasLayerForAnnotation;
+    BOOL _delegateHasAnnotationSorting;
     BOOL _delegateHasWillHideLayerForAnnotation;
     BOOL _delegateHasDidHideLayerForAnnotation;
     BOOL _delegateHasDidSelectAnnotation;
@@ -709,6 +707,7 @@
     _delegateHasDidChangeDragState = [_delegate respondsToSelector:@selector(mapView:annotation:didChangeDragState:fromOldState:)];
 
     _delegateHasLayerForAnnotation = [_delegate respondsToSelector:@selector(mapView:layerForAnnotation:)];
+    _delegateHasAnnotationSorting = [_delegate respondsToSelector:@selector(annotationSortingComparatorForMapView:)];
     _delegateHasWillHideLayerForAnnotation = [_delegate respondsToSelector:@selector(mapView:willHideLayerForAnnotation:)];
     _delegateHasDidHideLayerForAnnotation = [_delegate respondsToSelector:@selector(mapView:didHideLayerForAnnotation:)];
 
@@ -729,6 +728,7 @@
         BOOL flag = wasUserEvent;
 
         __weak RMMapView *weakSelf = self;
+        __weak id<RMMapViewDelegate> weakDelegate = _delegate;
         BOOL hasBeforeMapMove = _delegateHasBeforeMapMove;
         BOOL hasAfterMapMove  = _delegateHasAfterMapMove;
 
@@ -737,7 +737,7 @@
             dispatch_async(dispatch_get_main_queue(), ^(void)
             {
                 if (hasBeforeMapMove)
-                    [_delegate beforeMapMove:weakSelf byUser:flag];
+                    [weakDelegate beforeMapMove:weakSelf byUser:flag];
             });
         }
 
@@ -750,7 +750,7 @@
                 dispatch_async(dispatch_get_main_queue(), ^(void)
                 {
                     if (hasAfterMapMove)
-                        [_delegate afterMapMove:weakSelf byUser:flag];
+                        [weakDelegate afterMapMove:weakSelf byUser:flag];
                 });
             }];
         }
@@ -772,6 +772,7 @@
         BOOL flag = wasUserEvent;
 
         __weak RMMapView *weakSelf = self;
+        __weak id<RMMapViewDelegate> weakDelegate = _delegate;
         BOOL hasBeforeMapZoom = _delegateHasBeforeMapZoom;
         BOOL hasAfterMapZoom  = _delegateHasAfterMapZoom;
 
@@ -780,7 +781,7 @@
             dispatch_async(dispatch_get_main_queue(), ^(void)
             {
                 if (hasBeforeMapZoom)
-                    [_delegate beforeMapZoom:weakSelf byUser:flag];
+                    [weakDelegate beforeMapZoom:weakSelf byUser:flag];
             });
         }
 
@@ -793,7 +794,7 @@
                 dispatch_async(dispatch_get_main_queue(), ^(void)
                 {
                     if (hasAfterMapZoom)
-                        [_delegate afterMapZoom:weakSelf byUser:flag];
+                        [weakDelegate afterMapZoom:weakSelf byUser:flag];
                 });
             }];
         }
@@ -879,8 +880,6 @@
     myOrigin.x = myOrigin.x - (zoomRect.size.width / 2);
     myOrigin.y = myOrigin.y - (zoomRect.size.height / 2);
 
-    RMLog(@"Origin is calculated at: %f, %f", [_projection projectedPointToCoordinate:myOrigin].longitude, [_projection projectedPointToCoordinate:myOrigin].latitude);
-
     zoomRect.origin = myOrigin;
 
 //    RMLog(@"Origin: x=%f, y=%f, w=%f, h=%f", zoomRect.origin.easting, zoomRect.origin.northing, zoomRect.size.width, zoomRect.size.height);
@@ -964,7 +963,7 @@
 
 - (void)setCenterCoordinate:(CLLocationCoordinate2D)centerCoordinate
 {
-    [self setCenterProjectedPoint:[_projection coordinateToProjectedPoint:centerCoordinate]];
+    [self setCenterCoordinate:centerCoordinate animated:NO];
 }
 
 - (void)setCenterCoordinate:(CLLocationCoordinate2D)centerCoordinate animated:(BOOL)animated
@@ -990,7 +989,7 @@
 
 - (void)setCenterProjectedPoint:(RMProjectedPoint)centerProjectedPoint
 {
-    [self setCenterProjectedPoint:centerProjectedPoint animated:YES];
+    [self setCenterProjectedPoint:centerProjectedPoint animated:NO];
 }
 
 - (void)setCenterProjectedPoint:(RMProjectedPoint)centerProjectedPoint animated:(BOOL)animated
@@ -1344,6 +1343,7 @@
     _mapScrollView.maximumZoomScale = exp2f([self maxZoom]);
     _mapScrollView.contentOffset = CGPointMake(0.0, 0.0);
     _mapScrollView.clipsToBounds = NO;
+    _mapScrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
     _tiledLayersSuperview = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, contentSize.width, contentSize.height)];
     _tiledLayersSuperview.userInteractionEnabled = NO;
@@ -1377,6 +1377,7 @@
 
     _overlayView = [[RMMapOverlayView alloc] initWithFrame:[self bounds]];
     _overlayView.userInteractionEnabled = NO;
+    _overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
     [self insertSubview:_overlayView aboveSubview:_mapScrollView];
 
@@ -2497,7 +2498,7 @@
 {
     tileSourcesMinZoom = ceilf(tileSourcesMinZoom) - 0.99;
 
-    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0)
+    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0 && ! [RMMapboxSource isUsingLargeTiles])
         tileSourcesMinZoom -= 1.0;
 
     [self setMinZoom:tileSourcesMinZoom];
@@ -2524,7 +2525,7 @@
 {
     tileSourcesMaxZoom = floorf(tileSourcesMaxZoom);
 
-    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0)
+    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0 && ! [RMMapboxSource isUsingLargeTiles])
         tileSourcesMaxZoom -= 1.0;
 
     [self setMaxZoom:tileSourcesMaxZoom];
@@ -2557,7 +2558,7 @@
 {
     float zoom = ceilf(_zoom);
 
-    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0)
+    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0 && ! [RMMapboxSource isUsingLargeTiles])
         zoom += 1.0;
 
     return zoom;
@@ -2567,7 +2568,7 @@
 {
     tileSourcesZoom = floorf(tileSourcesZoom);
 
-    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0)
+    if ( ! self.adjustTilesForRetinaDisplay && _screenScale > 1.0 && ! [RMMapboxSource isUsingLargeTiles])
         tileSourcesZoom -= 1.0;
 
     [self setZoom:tileSourcesZoom];
@@ -2633,7 +2634,7 @@
 
 - (float)adjustedZoomForRetinaDisplay
 {
-    if (!self.adjustTilesForRetinaDisplay && _screenScale > 1.0)
+    if (!self.adjustTilesForRetinaDisplay && _screenScale > 1.0 && ! [RMMapboxSource isUsingLargeTiles])
         return [self zoom] + 1.0;
 
     return [self zoom];
@@ -2998,7 +2999,6 @@
             if ([annotation.layer isKindOfClass:[RMMarker class]])
                 annotation.layer.transform = _annotationTransform;
 
-            // Use the zPosition property to order the layer hierarchy
             if ( ! [_visibleAnnotations containsObject:annotation])
             {
                 [_overlayView addSublayer:annotation.layer];
@@ -3104,54 +3104,90 @@
 
 - (void)correctOrderingOfAllAnnotations
 {
-    if ( ! _orderMarkersByYPosition)
-        return;
-
-    // sort annotation layer z-indexes so that they overlap properly
-    //
     NSMutableArray *sortedAnnotations = [NSMutableArray arrayWithArray:[_visibleAnnotations allObjects]];
 
-    [sortedAnnotations filterUsingPredicate:[NSPredicate predicateWithFormat:@"isUserLocationAnnotation = NO"]];
+    NSComparator comparator;
 
-    [sortedAnnotations sortUsingComparator:^(id obj1, id obj2)
+    if (_delegateHasAnnotationSorting && (comparator = [_delegate annotationSortingComparatorForMapView:self]))
     {
-        RMAnnotation *annotation1 = (RMAnnotation *)obj1;
-        RMAnnotation *annotation2 = (RMAnnotation *)obj2;
-
-        // clusters above/below non-clusters (based on _orderClusterMarkersAboveOthers)
+        // Sort using the custom comparator.
         //
-        if (   annotation1.isClusterAnnotation && ! annotation2.isClusterAnnotation)
-            return (_orderClusterMarkersAboveOthers ? NSOrderedDescending : NSOrderedAscending);
-
-        if ( ! annotation1.isClusterAnnotation &&   annotation2.isClusterAnnotation)
-            return (_orderClusterMarkersAboveOthers ? NSOrderedAscending : NSOrderedDescending);
-
-        // markers above shapes
+        [sortedAnnotations sortUsingComparator:comparator];
+    }
+    else
+    {
+        // Sort using the default comparator.
         //
-        if (   [annotation1.layer isKindOfClass:[RMMarker class]] && ! [annotation2.layer isKindOfClass:[RMMarker class]])
-            return NSOrderedDescending;
+        [sortedAnnotations sortUsingComparator:^(RMAnnotation *annotation1, RMAnnotation *annotation2)
+        {
+            // Sort user location annotations below all.
+            //
+            if (   annotation1.isUserLocationAnnotation && ! annotation2.isUserLocationAnnotation)
+                return NSOrderedAscending;
 
-        if ( ! [annotation1.layer isKindOfClass:[RMMarker class]] &&   [annotation2.layer isKindOfClass:[RMMarker class]])
-            return NSOrderedAscending;
+            if ( ! annotation1.isUserLocationAnnotation &&   annotation2.isUserLocationAnnotation)
+                return NSOrderedDescending;
 
-        // the rest in increasing y-position
-        //
-        CGPoint obj1Point = [self convertPoint:annotation1.position fromView:_overlayView];
-        CGPoint obj2Point = [self convertPoint:annotation2.position fromView:_overlayView];
+            // Amongst user location annotations, sort properly.
+            //
+            if (annotation1.isUserLocationAnnotation && annotation2.isUserLocationAnnotation)
+            {
+                // User dot on top.
+                //
+                if ([annotation1 isKindOfClass:[RMUserLocation class]])
+                    return NSOrderedDescending;
 
-        if (obj1Point.y > obj2Point.y)
-            return NSOrderedDescending;
+                if ([annotation2 isKindOfClass:[RMUserLocation class]])
+                    return NSOrderedAscending;
 
-        if (obj1Point.y < obj2Point.y)
-            return NSOrderedAscending;
+                // Halo above accuracy circle.
+                //
+                if ([annotation1.annotationType isEqualToString:kRMTrackingHaloAnnotationTypeName])
+                    return NSOrderedDescending;
 
-        return NSOrderedSame;
-    }];
+                if ([annotation2.annotationType isEqualToString:kRMTrackingHaloAnnotationTypeName])
+                    return NSOrderedAscending;
+            }
 
+            // Return early if we're not otherwise sorting annotations.
+            //
+            if ( ! _orderMarkersByYPosition)
+                return NSOrderedSame;
+
+            // Sort clusters above non-clusters (factoring in orderClusterMarkersAboveOthers).
+            //
+            if (   annotation1.isClusterAnnotation && ! annotation2.isClusterAnnotation)
+                return (_orderClusterMarkersAboveOthers ? NSOrderedDescending : NSOrderedAscending);
+
+            if ( ! annotation1.isClusterAnnotation &&   annotation2.isClusterAnnotation)
+                return (_orderClusterMarkersAboveOthers ? NSOrderedAscending : NSOrderedDescending);
+
+            // Sort markers above shapes.
+            //
+            if (   [annotation1.layer isKindOfClass:[RMMarker class]] && ! [annotation2.layer isKindOfClass:[RMMarker class]])
+                return NSOrderedDescending;
+
+            if ( ! [annotation1.layer isKindOfClass:[RMMarker class]] &&   [annotation2.layer isKindOfClass:[RMMarker class]])
+                return NSOrderedAscending;
+
+            // Sort the rest in increasing y-position.
+            //
+            if (annotation1.absolutePosition.y > annotation2.absolutePosition.y)
+                return NSOrderedDescending;
+
+            if (annotation1.absolutePosition.y < annotation2.absolutePosition.y)
+                return NSOrderedAscending;
+
+            return NSOrderedSame;
+        }];
+    }
+
+    // Apply layering values based on sort order.
+    //
     for (CGFloat i = 0; i < [sortedAnnotations count]; i++)
         ((RMAnnotation *)[sortedAnnotations objectAtIndex:i]).layer.zPosition = (CGFloat)i;
 
-    // bring any active callout annotation to the front
+    // Bring any active callout annotation to the front.
     //
     if (_currentAnnotation)
         _currentAnnotation.layer.zPosition = _currentCallout.layer.zPosition = MAXFLOAT;
@@ -3283,8 +3319,8 @@
         //
         if ([CLLocationManager instancesRespondToSelector:@selector(requestWhenInUseAuthorization)])
         {
-            NSAssert([[[NSBundle mainBundle] infoDictionary] valueForKey:@"NSLocationWhenInUseUsageDescription"], @"For iOS 8 and above, your app must have a value for NSLocationWhenInUseUsageDescription in its Info.plist");
-            [_locationManager requestAlwaysAuthorization];
+            NSAssert([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"], @"For iOS 8 and above, your app must have a value for NSLocationWhenInUseUsageDescription in its Info.plist");
+            [_locationManager requestWhenInUseAuthorization];
         }
 #endif
 
@@ -3542,7 +3578,6 @@
         _accuracyCircleAnnotation.clusteringEnabled = NO;
         _accuracyCircleAnnotation.enabled = NO;
         _accuracyCircleAnnotation.layer = [[RMCircle alloc] initWithView:self radiusInMeters:newLocation.horizontalAccuracy];
-        _accuracyCircleAnnotation.layer.zPosition = -MAXFLOAT;
         _accuracyCircleAnnotation.isUserLocationAnnotation = YES;
 
         ((RMCircle *)_accuracyCircleAnnotation.layer).lineColor = (RMPreVersion7 ? [UIColor colorWithRed:0.378 green:0.552 blue:0.827 alpha:0.7] : [UIColor clearColor]);
@@ -3593,7 +3628,6 @@
         // create image marker
         //
         _trackingHaloAnnotation.layer = [[RMMarker alloc] initWithUIImage:[self trackingDotHaloImage]];
-        _trackingHaloAnnotation.layer.zPosition = -MAXFLOAT + 1;
         _trackingHaloAnnotation.isUserLocationAnnotation = YES;
 
         [CATransaction begin];
