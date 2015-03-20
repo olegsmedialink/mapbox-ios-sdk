@@ -40,12 +40,13 @@
 {
     if (!(self = [super init]))
         return nil;
-
-    NSAssert([_source isKindOfClass:[RMAbstractWebMapSource class]], @"only web-based tile sources are supported for downloading");
-
+    
+    NSAssert([source isKindOfClass:[RMAbstractWebMapSource class]], @"only web-based tile sources are supported for downloading");
+    
     _tile   = tile;
     _source = source;
     _cache  = cache;
+
 
     return self;
 }
